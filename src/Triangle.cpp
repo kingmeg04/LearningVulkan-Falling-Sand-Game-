@@ -623,7 +623,7 @@ private:
         return availableFormats[0]; // If no ideal format is found return what we've got
     }
 
-    // The method used for queuin images to be displayed
+    // The method used for queuing images to be displayed
     VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
         for (const auto& availablePresentMode : availablePresentModes) {
             if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
