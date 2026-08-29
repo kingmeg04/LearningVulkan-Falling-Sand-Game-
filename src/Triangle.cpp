@@ -43,6 +43,8 @@ struct SwapChainSupportDetails {
 
 class HelloTriangleApplication {
 public:
+    const std::string compilerOutput = "../cmake-build-debug/";
+
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
 
@@ -98,6 +100,8 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
+        createRenderPass();
+        createGraphicsPipeline();
     }
 
     void mainLoop() {
@@ -107,20 +111,16 @@ private:
     }
 
     void cleanup() {
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);       // clear the graphics pipeline
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);   // clear the pipeline layout (used for "uniforms" and "push constants")
+        vkDestroyRenderPass(device, renderPass, nullptr);           // clear the render pass
         for (auto imageView : swapChainImageViews)
-            vkDestroyImageView(device, imageView, nullptr); // clear the images of the swap chain
-
-
-        vkDestroySwapchainKHR(device, swapChain, nullptr);  // clear the swap chain
-
-        vkDestroyDevice(device, nullptr);                   // clear the logical device
-
-        vkDestroySurfaceKHR(instance, surface, nullptr);    // clear the surface (must be before clearing instance)
-
-        vkDestroyInstance(instance, nullptr);               // clear the instance
-
+            vkDestroyImageView(device, imageView, nullptr);         // clear the images of the swap chain
+        vkDestroySwapchainKHR(device, swapChain, nullptr);          // clear the swap chain
+        vkDestroyDevice(device, nullptr);                           // clear the logical device
+        vkDestroySurfaceKHR(instance, surface, nullptr);            // clear the surface (must be before clearing instance)
+        vkDestroyInstance(instance, nullptr);                       // clear the instance
         glfwDestroyWindow(window);
-
         glfwTerminate();
     }
 
@@ -655,6 +655,290 @@ private:
         }
     }
 
+    // ------------------------- Graphics Pipeline Section ------------------------- //
+    VkRenderPass renderPass;
+    VkPipelineLayout pipelineLayout;
+    VkPipeline graphicsPipeline;
 
+    void createGraphicsPipeline() {
+        auto vertShaderCode = readFile(compilerOutput + "shaders/shader2.vert.spv");
+        auto fragShaderCode = readFile(compilerOutput + "shaders/shader2.frag.spv");
+
+        VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+        VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+        // We can directly clear the shader modules again as it is only need to create the pipeline and not used after that
+        // This means we're allowed to clear them directly after the graphics pipeline has been created
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
+
+        // To actually use the shaders we need to assign them to a specific pipeline stage
+        VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+        vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;             // Which pipeline stage is the shader in
+        // Next two lines can be used to differentiate between shaders by setting different "entry points"
+        vertShaderStageInfo.module = vertShaderModule;                      // which shaderModule does this pipeline stage use
+        vertShaderStageInfo.pName = "main";                                 // Name of the pipeline stage (standard entry point "main")
+
+        // Same process for fragment shader
+        VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+        fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragShaderStageInfo.module = fragShaderModule;
+        fragShaderStageInfo.pName = "main";
+
+        // Put the pipeline stages into an array to be used in a later step
+        VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+        // Vertex input TODO: complete comments
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInputInfo.vertexBindingDescriptionCount = 0;
+        vertexInputInfo.pVertexBindingDescriptions = nullptr; // Optional
+        vertexInputInfo.vertexAttributeDescriptionCount = 0;
+        vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
+
+        // VkPipelineInputAssemblyStateCreateInfo struct defines what kind of geometry will be drawn from the vertices
+        // and if primitive restart should be enabled (TODO: what is primitive restart)
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;       // Type of geometry to be drawn
+        inputAssembly.primitiveRestartEnable = VK_FALSE;                    // Is primitive restart enabled
+
+        // Viewport is the region of the framebuffer that the output will be rendered to
+        // This will almost always be 0,0 to (width, height), so it has the same size
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = (float) swapChainExtent.width;
+        viewport.height = (float) swapChainExtent.height;
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+
+        // Scissor Rectangles define the region where pixels should be stored, any pixels outside this region will be discarded by the rasterizer
+        // This is why we define a scissor rectangle to cover the entire frameBuffer, since we want to draw the entire framebuffer
+        VkRect2D scissor{};
+        scissor.offset = {0, 0};
+        scissor.extent = swapChainExtent;
+
+        // Determines which states of the pipeline can be changed dynamically (e.g. window size)
+        // Since we want dynamic viewport and scissor rectangle, we must enable their dynamic states in the pipeline
+        std::vector<VkDynamicState> dynamicStates = {
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR
+        };
+        // Define the dynamic states of the pipeline
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+        dynamicState.pDynamicStates = dynamicStates.data();
+
+        // Specify the count of viewports and scissors at pipeline creation time
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        // Without the dynamic state the viewport and scissor rectangle would need to be set the following way, making them immutable
+        /*
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.pViewports = &viewport;
+        viewportState.scissorCount = 1;
+        viewportState.pScissors = &scissor;
+        */
+
+        // The rasterizer converts geometry into fragments so the fragment shader can color them later (Fragments are converted to pixels later)
+        // It can be configured to output fragments that fill the entire polygon or just the edges (wireframe)
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.depthClampEnable = VK_FALSE;
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;          // If this is enabled, the rasterizer discards and output to the framebuffer
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;          // The mode for rendering polygons (alternatives are line and point modes)
+        rasterizer.lineWidth = 1.0f;                            // Line width if using a mode other than fill (Any thickness greater than 1.0f requires enabling wideLines GPU feature)
+        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;            // The type of face culling (back or front face culling)
+        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;         // Specifies the vertex order to be considered front/back facing
+        rasterizer.depthBiasEnable = VK_FALSE;                  // The rasterizer has the ability to bias depth values if enabled
+        rasterizer.depthBiasConstantFactor = 0.0f; // Optional
+        rasterizer.depthBiasClamp = 0.0f; // Optional
+        rasterizer.depthBiasSlopeFactor = 0.0f; // Optional
+
+        // VkPipelineMultisampleStateCreateInfo configures multisampling, which is used for antialiasing
+        // It combines fragment shader results to rasterize to the same pixel to reduce the hardness of the pixel edges
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.sampleShadingEnable = VK_FALSE;
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        multisampling.minSampleShading = 1.0f; // Optional
+        multisampling.pSampleMask = nullptr; // Optional
+        multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
+        multisampling.alphaToOneEnable = VK_FALSE; // Optional
+
+        // The output of the rasterizer needs to be blended with the color already present in the frame buffer. There's two options:
+        // 1. Mix old and new
+        // 2. Combine old and new with bitwise operation
+
+        // VkPipelineColorBlendAttachmentState defines the configuration per attached frame buffer TODO: complete comments
+        // Since we only have one frame buffer this is only defined once
+        VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        // Alpha blending:
+        // finalColor.rgb = newAlpha * newColor + (1 - newAlpha) * oldColor;
+        // finalColor.a = newAlpha.a;
+        colorBlendAttachment.blendEnable = VK_TRUE;
+        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        // Alternative mixing config:
+        /*
+        * if (blendEnable) {
+        * finalColor.rgb = (srcColorBlendFactor * newColor.rgb) <colorBlendOp> (dstColorBlendFactor * oldColor.rgb);
+        * finalColor.a = (srcAlphaBlendFactor * newColor.a) <alphaBlendOp> (dstAlphaBlendFactor * oldColor.a);
+        * } else {
+        *     finalColor = newColor;
+        * }
+        *
+        * finalColor = finalColor & colorWriteMask;
+        */
+
+        /*
+        colorBlendAttachment.blendEnable = VK_FALSE;
+        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
+        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
+        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD; // Optional
+        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
+        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
+        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD; // Optional
+        */
+
+
+
+        // VkPipelineColorBlendStateCreateInfo defines the global configuration for color blending
+        VkPipelineColorBlendStateCreateInfo colorBlending{};
+        colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlending.logicOpEnable = VK_FALSE;
+        colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
+        colorBlending.attachmentCount = 1;
+        colorBlending.pAttachments = &colorBlendAttachment;
+        colorBlending.blendConstants[0] = 0.0f; // Optional
+        colorBlending.blendConstants[1] = 0.0f; // Optional
+        colorBlending.blendConstants[2] = 0.0f; // Optional
+        colorBlending.blendConstants[3] = 0.0f; // Optional
+
+        // Uniform values used in shaders behave like globals and are commonly used for passing samples or transormation matricies from one shader to another
+        // These uniforms need to be specified during the pipeline creation using VkPipelineLayout TODO: complete comments
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 0; // Optional
+        pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+        pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
+        pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
+
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create pipeline layout!");
+        }
+
+        // Finally create the graphics pipeline
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = shaderStages;
+        // reference the array of VkPipelineShaderStageCreateInfo structs
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = nullptr; // Optional
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = pipelineLayout;
+        pipelineInfo.renderPass = renderPass;
+        pipelineInfo.subpass = 0;                                       // Index of the subpass to be used
+        // These allow a pipeline to be derived from an existing pipeline, potentially allowing Vulkan to reuse some of its state/implementation
+        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+        pipelineInfo.basePipelineIndex = -1;               // Optional
+
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create graphics pipeline!");
+        }
+
+    }
+
+    void createRenderPass() {
+        // Single color buffer attachment with and image from the swap chain
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = swapChainImageFormat;                  // Match the image format of the swap chain
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;                // No multisampling so only 1 sample
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;           // Determines what to do with data before rendering
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;         // Determines what to do with data after rendering
+        // No stencils are used so we do nothing with them
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;  // Present the image to swap chain
+
+        // Subpasses can be reordered within a single pass by Vulkan to preserve memory bandwidth
+        // Every subpass references one or more attachments, described by VkAttachmentReference
+        VkAttachmentReference colorAttachmentRef{};
+        colorAttachmentRef.attachment = 0;
+        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;    // Specify the type of subpass
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &colorAttachmentRef;                // referenced in fragment shader by: layout(location = 0) out vec4 outColor
+
+        // Finally fill the renderPassInfo object to create the render pass
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+
+        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create render pass!");
+        }
+    }
+
+    VkShaderModule createShaderModule(const std::vector<char>& code) {
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = code.size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+        // Since data is stored in a std::vector, the alignment requirements satisfy the worst case scenario //
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shader module!");
+        }
+        return shaderModule;
+    }
+
+    // Read shader files
+    static std::vector<char> readFile(const std::string& filename) {
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+        // ate: start reading from end of file | binary: read file as binary file to avoid text transformation //
+        // ate is useful as it lets us allocate a buffer to be large enough for the entire file without needing to reallocate
+
+        if (!file.is_open()) {
+            throw std::runtime_error("failed to open file!");
+        }
+
+        size_t fileSize = (size_t) file.tellg();
+        std::vector<char> buffer(fileSize);     // Allocate a buffer with the size of the file for reading
+
+        file.seekg(0);                       // Go back to the beginning of the file
+        file.read(buffer.data(), fileSize);   // Read the file into the buffer
+
+        file.close();
+
+        return buffer;
+    }
 };
-
