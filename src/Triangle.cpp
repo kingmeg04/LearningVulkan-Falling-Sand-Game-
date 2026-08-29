@@ -679,13 +679,11 @@ private:
     VkPipeline graphicsPipeline;
 
     void createGraphicsPipeline() {
-        auto vertShaderCode = readFile(compilerOutput + "shaders/shader1.vert.spv");
-        auto fragShaderCode = readFile(compilerOutput + "shaders/shader1.frag.spv");
+        auto vertShaderCode = readFile(compilerOutput + "shaders/shader2.vert.spv");
+        auto fragShaderCode = readFile(compilerOutput + "shaders/shader2.frag.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
-
-
 
         // To actually use the shaders we need to assign them to a specific pipeline stage
         VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
@@ -801,6 +799,7 @@ private:
         // Alpha blending:
         // finalColor.rgb = newAlpha * newColor + (1 - newAlpha) * oldColor;
         // finalColor.a = newAlpha.a;
+        /*
         colorBlendAttachment.blendEnable = VK_TRUE;
         colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -808,6 +807,7 @@ private:
         colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+        */
 
         // Alternative mixing config:
         /*
@@ -821,7 +821,7 @@ private:
         * finalColor = finalColor & colorWriteMask;
         */
 
-        /*
+
         colorBlendAttachment.blendEnable = VK_FALSE;
         colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
         colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
@@ -829,7 +829,7 @@ private:
         colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
         colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
         colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD; // Optional
-        */
+
 
 
 
@@ -898,7 +898,6 @@ private:
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;         // Determines what to do with data after rendering
         // No stencils are used so we do nothing with them
         colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;  // Present the image to swap chain
 

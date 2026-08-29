@@ -1,8 +1,9 @@
 #version 450
 
-// Location determines which interface "slot" the variable uses for other shaders to access
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    outColor = vec4(1.0, 0.0, 0.0, 1.0);
+    // Use screen-space position instead of interpolated vertex color
+    vec2 uv = gl_FragCoord.xy / vec2(800.0, 600.0);  // normalize by your WIDTH/HEIGHT
+    outColor = vec4(uv, 0.5, 1.0);
 }
