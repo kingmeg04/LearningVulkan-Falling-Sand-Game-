@@ -5,6 +5,38 @@ struct SwapChainSupportDetails {
     std::vector<VkPresentModeKHR> presentModes;
 };
 
+struct Vertex {
+    glm::vec2 pos;
+    glm::vec3 color;
+
+    static VkVertexInputBindingDescription getBindingDescription() {
+        // Vertex binding describes at which rate to load data from memory throughout the vertices
+        VkVertexInputBindingDescription bindingDescription{};
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(Vertex);
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        return bindingDescription;
+    }
+
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        // There are two attribute descriptions, position and color
+        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+        // Set attributes of position
+        attributeDescriptions[0].binding = 0;                       // Which binding does the per-vertex data come from
+        attributeDescriptions[0].location = 0;                      // Which layout location is the attribute present at
+        attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].offset = offsetof(Vertex, pos);    // How many bytes from the start of the per-vertex data to read from
+        // Set attributes for color
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        return attributeDescriptions;
+    }
+};
+
 class HelloTriangleApplication {
 public:
     const std::string compilerOutput = "../cmake-build-debug/";
@@ -18,7 +50,7 @@ public:
         "VK_LAYER_KHRONOS_validation"
     };
 
-    const VkQueueFlags requiredQueueFlags = VK_QUEUE_GRAPHICS_BIT;
+    const VkQueueFlags requiredQueueFlags = VK_QUEUE_GRAPHICS_BIT; //| VK_QUEUE_TRANSFER_BIT; // VK_QUEUE_TRANSFER_BIT is implied by VK_QUEUE_GRAPHICS_BIT so it's not really necessary
 
     const std::vector<const char*> deviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
@@ -39,15 +71,16 @@ public:
 
 private:
 
-    // ------------------------- Setup Section ------------------------- //
+    // ========================= Setup Section ========================= //
     GLFWwindow *window;
     VkInstance instance;
     VkPhysicalDevice physicalDevice;
     VkDevice device;
     VkQueue graphicsQueue;
     VkQueue presentQueue;
+    VkQueue transferQueue;
 
-    std::vector<uint32_t> queueFamilyIndices;
+    std::vector<std::pair<uint32_t, VkQueueFlags>> selectedQueueFamilies;
 
     void initWindow() {
         glfwInit();
@@ -70,7 +103,9 @@ private:
         createRenderPass();
         createGraphicsPipeline();
         createFramebuffers();
-        createCommandPool();
+        createCommandPools();
+        createVertexBuffer();
+        createIndexBuffer();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -87,6 +122,11 @@ private:
 
         cleanupSwapChain();
 
+        vkDestroyBuffer(device, indexBuffer, nullptr);              // clear th index buffer
+        vkFreeMemory(device, indexBufferMemory, nullptr);           // free the memory allocated for the index buffer
+        vkDestroyBuffer(device, vertexBuffer, nullptr);             // clear the vertex buffer
+        vkFreeMemory(device, vertexBufferMemory, nullptr);          // free the memory allocated for the vertex buffer
+
         vkDestroyPipeline(device, graphicsPipeline, nullptr);       // clear the graphics pipeline
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);   // destroy the pipeline layout (used for "uniforms" and "push constants")
 
@@ -97,14 +137,9 @@ private:
             vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
-        // Gets cleaned up by cleanupSwapChain();
-        /*
-        for (size_t i = 0; i < renderFinishedSemaphores.size(); i++) {
-            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-        }
-        */
 
-        vkDestroyCommandPool(device, commandPool, nullptr);         // destroy the command pool
+        vkDestroyCommandPool(device, transferCommandPool, nullptr); // destroy the transfer command pool
+        vkDestroyCommandPool(device, graphicsCommandPool, nullptr); // destroy the graphics command pool
 
         vkDestroyDevice(device, nullptr);                           // destroy the logical device
 
@@ -237,24 +272,32 @@ private:
         if (indices.size() <= 0)
             throw std::runtime_error("No compatible queue family found!");
 
+
+
         // Check if any of the families with support also support present
         VkBool32 presentSupport = false;
         for (uint32_t candidate : indices) {
             vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, candidate, surface, &presentSupport);
             if (presentSupport) {
-                queueFamilyIndices.push_back(candidate);
+                selectedQueueFamilies.emplace_back(candidate, requiredQueueFlags);
+                selectedQueueFamilies.emplace_back(findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT);
+                // Guaranteed to succeed since VK_QUEUE_GRAPHICS_BIT implies VK_QUEUE_TRANSFER_BIT //
                 break;
             }
         }
 
         // If no ideal family was found, find another family with present support
         if (!presentSupport) {
-            queueFamilyIndices.push_back(indices[0]);
+
+            selectedQueueFamilies.emplace_back(indices[0], requiredQueueFlags);
+            selectedQueueFamilies.emplace_back(findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT);
+            // Guaranteed to succeed since VK_QUEUE_GRAPHICS_BIT implies VK_QUEUE_TRANSFER_BIT //
+
             indices = findQueueFamilies(physicalDevice, 0);
             for (uint32_t candidate : indices) {
                 vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, candidate, surface, &presentSupport);
                 if (presentSupport) {
-                    queueFamilyIndices.push_back(candidate);
+                    selectedQueueFamilies.emplace_back(candidate, 0);
                     break;
                 }
             }
@@ -264,13 +307,13 @@ private:
         }
 
 
+
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         float queuePriority = 1.0f; // (range from 0.0 - 1.0)
 
-        for (uint32_t family : queueFamilyIndices) {
+        for (const auto& [family, flags] : selectedQueueFamilies) {
             VkDeviceQueueCreateInfo queueCreateInfo{};                                      // Creating the queues for the queueFamily
             queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-            //queueCreateInfo.queueFamilyIndex = *familyIndex;
             queueCreateInfo.queueFamilyIndex = family;
             queueCreateInfo.queueCount = 1;                                                 // How many Queues should the family have
             queueCreateInfo.pQueuePriorities = &queuePriority;                              // The priority of the queue
@@ -286,17 +329,6 @@ private:
 
         createInfo.pEnabledFeatures = &deviceFeatures;                                      // Which features should the logical device enable
 
-        // Rest is similar to VkInstanceCreateInfo
-        /*
-        createInfo.enabledExtensionCount = 0;
-
-        if (enableValidationLayers) {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-            createInfo.ppEnabledLayerNames = validationLayers.data();
-        } else {
-            createInfo.enabledLayerCount = 0;
-        }
-        */
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());  // How many extensions do we want to enable
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();                       // Extensions to enable
 
@@ -309,12 +341,16 @@ private:
 
         // Assign the graphicsQueue to the Queue (This must have present support)
         //vkGetDeviceQueue(device, *familyIndex, 0, &graphicsQueue);
-        vkGetDeviceQueue(device, queueFamilyIndices[0], 0, &graphicsQueue);
+        vkGetDeviceQueue(device, selectedQueueFamilies[0].first, 0, &graphicsQueue);
+        vkGetDeviceQueue(device, selectedQueueFamilies[1].first, 0, &transferQueue);
 
-        if (queueFamilyIndices.size() > 1)
-            vkGetDeviceQueue(device, queueFamilyIndices[1], 0, &presentQueue);
-        else
-            vkGetDeviceQueue(device, queueFamilyIndices[0], 0, &presentQueue);  // same family, same queue
+        if (selectedQueueFamilies.size() > 2) {
+            vkGetDeviceQueue(device, selectedQueueFamilies[2].first, 0, &presentQueue);
+        } else {
+            vkGetDeviceQueue(device, selectedQueueFamilies[0].first, 0, &presentQueue);  // same family, same queue
+        }
+
+
     }
 
     bool isDeviceSuitable(VkPhysicalDevice device) {
@@ -417,6 +453,18 @@ private:
 
         return std::nullopt;
     }
+    std::vector<uint32_t> convertQueueFamiliesFormat(const std::vector<std::pair<uint32_t, VkQueueFlags>>& queueFamilies) {
+        std::vector<uint32_t> queueFamilyIndices;
+        queueFamilyIndices.reserve(selectedQueueFamilies.size());
+
+        for (const auto& [family, flags] : selectedQueueFamilies) {
+            if (std::find(queueFamilyIndices.begin(), queueFamilyIndices.end(), family)
+                == queueFamilyIndices.end()) {
+                queueFamilyIndices.push_back(family);
+                }
+        }
+        return queueFamilyIndices;
+    }
 
     // alternative to just checking if a device is suitable, but finding the best candidate
     uint32_t rateDeviceSuitability(VkPhysicalDevice device) {
@@ -425,8 +473,6 @@ private:
 
         vkGetPhysicalDeviceProperties(device, &deviceProperties);   // Get the properties of the device
         vkGetPhysicalDeviceFeatures(device, &deviceFeatures);       // Additional features supported by the device
-
-        // QueueFamilyIndices indices = findQueueFamilies(device);
 
         if (!(
             devicePropertySupport(deviceProperties) &&          // check if device supports required properties
@@ -452,7 +498,7 @@ private:
         return score;
     }
 
-    // ------------------------- Presentation Section ------------------------- //
+    // ========================= Presentation Section ========================= //
     VkSurfaceKHR surface;
     VkSwapchainKHR swapChain;
     std::vector<VkImage> swapChainImages;
@@ -500,8 +546,10 @@ private:
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;    // Defines what kind of operations the images will be used for (e.g. if an image is used in post-processing)
 
 
+        std::vector<uint32_t> queueFamilyIndices = convertQueueFamiliesFormat(selectedQueueFamilies);
+
         if (queueFamilyIndices.size() > 1) {
-            // present family is in a separate queueFamily than graphics family
+            // present family is in a separate queueFamily than graphics familyW
             createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
             // Images can be used across multiple queue families without explicit ownership transfers.
             createInfo.queueFamilyIndexCount = static_cast<uint32_t>(queueFamilyIndices.size());
@@ -676,7 +724,7 @@ private:
         app->framebufferResized = true;
     }
 
-    // ------------------------- Graphics Pipeline Section ------------------------- //
+    // ========================= Graphics Pipeline Section ========================= //
     VkRenderPass renderPass;
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
@@ -707,12 +755,15 @@ private:
         VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
         // Vertex input TODO: complete comments
+        auto bindingDescription = Vertex::getBindingDescription();
+        auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInputInfo.vertexBindingDescriptionCount = 0;
-        vertexInputInfo.pVertexBindingDescriptions = nullptr; // Optional
-        vertexInputInfo.vertexAttributeDescriptionCount = 0;
-        vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+        vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
         // VkPipelineInputAssemblyStateCreateInfo struct defines what kind of geometry will be drawn from the vertices
         // and if primitive restart should be enabled
@@ -720,7 +771,7 @@ private:
         // (only relevant with indexed draws and strip/fan topologies)
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;       // Type of geometry to be drawn
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;       // Type of geometry to be drawn
         inputAssembly.primitiveRestartEnable = VK_FALSE;                    // Is primitive restart enabled
 
         // Viewport is the region of the framebuffer that the output will be rendered to
@@ -953,9 +1004,175 @@ private:
         return buffer;
     }
 
-    // ------------------------- Drawing Section ------------------------- //
+    // ----- Vertex Buffers ----- //
+    VkBuffer vertexBuffer;
+    VkDeviceMemory vertexBufferMemory;
+    VkBuffer indexBuffer;
+    VkDeviceMemory indexBufferMemory;
+
+    const std::vector<Vertex> vertices = {
+        {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+        {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+    };
+    // Using uint16_t for less than 65535 unique vertices
+    const std::vector<uint16_t> indices = {
+        0, 1, 2, 2, 3, 0
+    };
+
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+        std::vector<uint32_t> queueFamilyIndices = convertQueueFamiliesFormat(selectedQueueFamilies);
+
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
+        bufferInfo.queueFamilyIndexCount = static_cast<uint32_t>(queueFamilyIndices.size());
+        bufferInfo.pQueueFamilyIndices = queueFamilyIndices.data();
+
+        if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create buffer!");
+        }
+
+        VkMemoryRequirements memRequirements;
+        vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+        if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate buffer memory!");
+        }
+
+        vkBindBufferMemory(device, buffer, bufferMemory, 0);
+    }
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+        // Allocate a temporary command buffer to submit the memory transfer operation
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = transferCommandPool;
+        allocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+
+        // Immediately start recording this command buffer
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;      // Hint to the driver that we will wait for copy to finish and then submit once
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        VkBufferCopy copyRegion{};
+        copyRegion.srcOffset = 0; // Optional
+        copyRegion.dstOffset = 0; // Optional
+        copyRegion.size = size;
+        // Actual copy operation for copying the source buffer into the destination buffer is vkCmdCopyBuffer(...)
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+        vkEndCommandBuffer(commandBuffer);
+
+        // TODO: cleaner fence implementation
+        // Create fence for this submission
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+        VkFence fence;
+        if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create fence!");
+        }
+
+        // We don't need to wait on anything, so we execute the transfer on the buffers immediately
+        // It's possible to use a fence or wait for transfer queue to become idle, so we know when the operation has completed
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        // Associate the fence with this submission
+        if (vkQueueSubmit(transferQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to submit transfer command buffer!");
+        }
+
+        vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);        // Wait for THIS submission to finish
+        vkDestroyFence(device, fence, nullptr);
+
+        // vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);         // Submit this command
+        // vkQueueWaitIdle(transferQueue); // easier implementation (no gain from asynchronous implementation)
+
+        vkFreeCommandBuffers(device, transferCommandPool, 1, &commandBuffer);   // Cleanup
+    }
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+        VkPhysicalDeviceMemoryProperties memProperties;
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+        // Find memory suitable for the buffer
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+            if (
+            typeFilter & (1 << i)   &&                                                  // Is the bitflag for the required memory type set
+            (memProperties.memoryTypes[i].propertyFlags & properties) == properties     // Search for memory with the requested properties
+            ) {
+                return i;
+            }
+        }
+
+        throw std::runtime_error("failed to find suitable memory type!");
+    }
+
+    void createVertexBuffer() {
+        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+
+        // Staging buffer is used to copy vertex data from host-visible memory into device-local memory
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, vertices.data(), (size_t) bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+        copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+
+        // Clear and free the temporary staging buffer
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+    // Similar to creating the vertex buffer
+    void createIndexBuffer() {
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, indices.data(), (size_t) bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
+
+        copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+
+
+
+
+    // ========================= Drawing Section ========================= //
     std::vector<VkFramebuffer> swapChainFramebuffers;
-    VkCommandPool commandPool;
+    VkCommandPool graphicsCommandPool;
+    VkCommandPool transferCommandPool;
     std::vector<VkCommandBuffer> commandBuffers;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
@@ -989,15 +1206,31 @@ private:
         }
     }
 
-    void createCommandPool() {
-        VkCommandPoolCreateInfo poolInfo{};
-        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = queueFamilyIndices[0];
+    void createCommandPools() {
+        // Create command pool for graphics family
+        VkCommandPoolCreateInfo graphicsPoolInfo{};
+        graphicsPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        graphicsPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        graphicsPoolInfo.queueFamilyIndex = selectedQueueFamilies[0].first;
 
-        if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create command pool!");
+        if (vkCreateCommandPool(device, &graphicsPoolInfo, nullptr, &graphicsCommandPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create graphics command pool!");
         }
+
+        // Create command pool for transfer family
+        VkCommandPoolCreateInfo transferPoolInfo{};
+        transferPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        transferPoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+        for (const auto& [family, flags] : selectedQueueFamilies) {
+            if (flags == VK_QUEUE_TRANSFER_BIT) {
+                transferPoolInfo.queueFamilyIndex = family;
+                break;
+            }
+        }
+        if (vkCreateCommandPool(device, &transferPoolInfo, nullptr, &transferCommandPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create graphics command pool!");
+        }
+
     }
 
     void createCommandBuffers() {
@@ -1005,7 +1238,7 @@ private:
 
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool = commandPool;
+        allocInfo.commandPool = graphicsCommandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;      // Is the command buffer primary or secondary (secondary buffers can only be called by primary buffers)
         allocInfo.commandBufferCount = (uint32_t) commandBuffers.size();
 
@@ -1061,7 +1294,14 @@ private:
         scissor.extent = swapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vkCmdDraw(commandBuffer, 4, 1, 0, 0);
+        // Bind vertex buffer during draw
+        VkBuffer vertexBuffers[] = {vertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        // Bind the index and vertex buffers
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);      // End the render pass
 
