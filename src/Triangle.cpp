@@ -1,40 +1,4 @@
 #include "pch.h"
-
-// Queue Families are sets of queues, which each support a specific set of functions, checked by control bits (e.g. line 25)
-/*
-struct QueueFamilyIndices {
-    std::optional<uint32_t> graphicsFamily;
-
-    // Check whether graphics family has already been found yet
-    bool isComplete() {
-        return graphicsFamily.has_value();
-    }
-};
-
-QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
-    QueueFamilyIndices indices;
-
-    uint32_t queueFamilyCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);   // How many queue families are there
-
-    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, &queueFamilies[0]);             // What are those families
-
-    // find at least one queue family supporting graphics
-    int i = 0;
-    for (const auto& queueFamily : queueFamilies) {
-        if (queueFamily.queueFlags & requiredQueueFlags)
-            indices.graphicsFamily = i;                                                                 // set the graphics family to the index, so we know it's been found
-        if (indices.isComplete())
-            break;
-
-        i++;
-    }
-
-    return indices;
-}
-*/
-
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
@@ -92,13 +56,12 @@ private:
         // glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);   // hint to make the window non-resizeable
 
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
-        glfwSetWindowUserPointer(window, this);      // Tell GLFW what the window pointer is
+        glfwSetWindowUserPointer(window, this);      // Attaches a pointer to "this" to associate the app instance with the window so callbacks can retrieve it
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     }
 
     void initVulkan() {
         createInstance();
-        //setupDebugMessenger(); // this is for custom control over the debug output from validation layers
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
@@ -134,15 +97,16 @@ private:
             vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
+        // Gets cleaned up by cleanupSwapChain();
+        /*
         for (size_t i = 0; i < renderFinishedSemaphores.size(); i++) {
             vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
         }
+        */
 
         vkDestroyCommandPool(device, commandPool, nullptr);         // destroy the command pool
 
         vkDestroyDevice(device, nullptr);                           // destroy the logical device
-
-        // if (enableValidationLayers) DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr)
 
         vkDestroySurfaceKHR(instance, surface, nullptr);            // destroy the surface
         vkDestroyInstance(instance, nullptr);                       // destroy the instance
@@ -161,23 +125,13 @@ private:
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;         // struct type
         appInfo.pApplicationName = "Hello Triangle";                // Name
-        appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);      // My applications version
+        appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);      // My application's version
         appInfo.pEngineName = "No Engine";                          // Engine (running the application, aka me)
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);           // Engine's version
         appInfo.apiVersion = VK_API_VERSION_1_3;                    // The version of Vulkan being used
 
         // create Info
         VkInstanceCreateInfo createInfo{};
-
-        // Validation layers (used primarily for development/debugging of Vulkan errors)
-        /*
-         * const char* validationLayers[] = {
-            "VK_LAYER_KHRONOS_validation"
-        };  // this is a less useful implementation
-
-        createInfo.enabledLayerCount = (uint32_t)sizeof(validationLayers) / sizeof(char*);  // # Layers in (char*) validationLayers[]
-        createInfo.ppEnabledLayerNames = validationLayers.data();                           // passing (char*) validationLayers to createInfo
-        */
 
         if (enableValidationLayers) {
             createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());  // # of validation layers
@@ -189,7 +143,6 @@ private:
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;                          // struct type
         createInfo.pApplicationInfo = &appInfo;                                             // reference appInfo defined above
 
-        // Extensions (not relevant atm)
         uint32_t glfwExtensionCount = 0;
         const char** glfwExtensions;
 
@@ -280,14 +233,6 @@ private:
     }
 
     void createLogicalDevice() {
-        // alternative approach just choosing the first family found with correct flags
-        /*
-        std::optional<uint32_t> familyIndex = findQueueFamily(physicalDevice, requiredQueueFlags);  // find the first queueFamily with required flags
-
-        if (!familyIndex)
-            throw std::runtime_error("No compatible queue family found!");
-        */
-
         std::vector<uint32_t> indices = findQueueFamilies(physicalDevice, requiredQueueFlags);
         if (indices.size() <= 0)
             throw std::runtime_error("No compatible queue family found!");
@@ -332,7 +277,7 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
         VkPhysicalDeviceFeatures deviceFeatures{};                                          // Features that should be enabled
-        deviceFeatures.geometryShader = true;
+        deviceFeatures.geometryShader = VK_TRUE;
 
         VkDeviceCreateInfo createInfo{};                                                    // Creating the actual device
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -384,7 +329,7 @@ private:
             deviceFeatureSupport(deviceFeatures)    &&          // check if device supports required features
             deviceFamilySupport(device)             &&          // check if device has a matching Family
             // check if device supports required extensions
-            deviceExensionSupport(device, std::set<std::string>(deviceExtensions.begin(), deviceExtensions.end())) &&
+            deviceExtensionSupport(device, std::set<std::string>(deviceExtensions.begin(), deviceExtensions.end())) &&
             deviceSwapChainSupport(device)                      // check if device has suitable swap chain
             );
     }
@@ -406,7 +351,7 @@ private:
     }
 
     // Check all extensions required from the device
-    bool deviceExensionSupport(VkPhysicalDevice device, std::set<std::string> requiredExtensions) {
+    bool deviceExtensionSupport(VkPhysicalDevice device, std::set<std::string> requiredExtensions) {
         uint32_t extensionCount;
         vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);                    // How many extensions are there
 
@@ -488,7 +433,7 @@ private:
             deviceFeatureSupport(deviceFeatures)    &&          // check if device supports required features
             deviceFamilySupport(device)             &&          // check if device has a matching Family
             // check if device supports required extensions
-            deviceExensionSupport(device, std::set<std::string>(deviceExtensions.begin(), deviceExtensions.end())) &&
+            deviceExtensionSupport(device, std::set<std::string>(deviceExtensions.begin(), deviceExtensions.end())) &&
             deviceSwapChainSupport(device)                      // check if device has suitable swap chain
             ))
             return 0;
@@ -562,7 +507,7 @@ private:
             createInfo.queueFamilyIndexCount = static_cast<uint32_t>(queueFamilyIndices.size());
             createInfo.pQueueFamilyIndices = queueFamilyIndices.data();
         } else {
-            // present is contained withing graphics family
+            // present is contained within graphics family
             createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
             // An image is owned by one queue family at a time and ownership must be explicitly transferred before using it in another queue family.
             // This option offers the best performance.
@@ -606,6 +551,7 @@ private:
         createSwapChain();
         createImageViews();
         createFramebuffers();
+        createRenderFinishedSemaphores();   // Adjust semaphores dependent on swap chain
     }
 
     void createImageViews() {
@@ -709,13 +655,17 @@ private:
     }
 
     void cleanupSwapChain() {
-        for (auto framebuffer : swapChainFramebuffers) {
+        // Clean the swap chain
+        for (auto framebuffer : swapChainFramebuffers)
             vkDestroyFramebuffer(device, framebuffer, nullptr);
-        }
 
-        for (auto imageView : swapChainImageViews) {
+        for (auto imageView : swapChainImageViews)
             vkDestroyImageView(device, imageView, nullptr);
-        }
+
+        // Adjust semaphores, which depend on swap chain
+        for (auto semaphore : renderFinishedSemaphores)
+            vkDestroySemaphore(device, semaphore, nullptr);
+        renderFinishedSemaphores.clear();
 
         vkDestroySwapchainKHR(device, swapChain, nullptr);
     }
@@ -765,10 +715,12 @@ private:
         vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
 
         // VkPipelineInputAssemblyStateCreateInfo struct defines what kind of geometry will be drawn from the vertices
-        // and if primitive restart should be enabled (TODO: what is primitive restart)
+        // and if primitive restart should be enabled
+        // primitive restart lets a special index value (0xFFFF/0xFFFFFFFF) split one draw call into multiple strips without ending the draw
+        // (only relevant with indexed draws and strip/fan topologies)
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;       // Type of geometry to be drawn
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;       // Type of geometry to be drawn
         inputAssembly.primitiveRestartEnable = VK_FALSE;                    // Is primitive restart enabled
 
         // Viewport is the region of the framebuffer that the output will be rendered to
@@ -820,7 +772,7 @@ private:
         VkPipelineRasterizationStateCreateInfo rasterizer{};
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
-        rasterizer.rasterizerDiscardEnable = VK_FALSE;          // If this is enabled, the rasterizer discards and output to the framebuffer
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;          // If this is enabled, the rasterizer discards the output to the framebuffer
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;          // The mode for rendering polygons (alternatives are line and point modes)
         rasterizer.lineWidth = 1.0f;                            // Line width if using a mode other than fill (Any thickness greater than 1.0f requires enabling wideLines GPU feature)
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;            // The type of face culling (back or front face culling)
@@ -852,7 +804,6 @@ private:
         // Alpha blending:
         // finalColor.rgb = newAlpha * newColor + (1 - newAlpha) * oldColor;
         // finalColor.a = newAlpha.a;
-        /*
         colorBlendAttachment.blendEnable = VK_TRUE;
         colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -860,31 +811,6 @@ private:
         colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-        */
-
-        // Alternative mixing config:
-        /*
-        * if (blendEnable) {
-        * finalColor.rgb = (srcColorBlendFactor * newColor.rgb) <colorBlendOp> (dstColorBlendFactor * oldColor.rgb);
-        * finalColor.a = (srcAlphaBlendFactor * newColor.a) <alphaBlendOp> (dstAlphaBlendFactor * oldColor.a);
-        * } else {
-        *     finalColor = newColor;
-        * }
-        *
-        * finalColor = finalColor & colorWriteMask;
-        */
-
-
-        colorBlendAttachment.blendEnable = VK_FALSE;
-        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
-        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
-        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD; // Optional
-        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
-        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
-        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD; // Optional
-
-
-
 
         // VkPipelineColorBlendStateCreateInfo defines the global configuration for color blending
         VkPipelineColorBlendStateCreateInfo colorBlending{};
@@ -898,7 +824,7 @@ private:
         colorBlending.blendConstants[2] = 0.0f; // Optional
         colorBlending.blendConstants[3] = 0.0f; // Optional
 
-        // Uniform values used in shaders behave like globals and are commonly used for passing samples or transormation matricies from one shader to another
+        // Uniform values used in shaders behave like globals and are commonly used for passing samples or transformation matrices from one CPU to GPU
         // These uniforms need to be specified during the pipeline creation using VkPipelineLayout TODO: complete comments
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -943,7 +869,7 @@ private:
     }
 
     void createRenderPass() {
-        // Single color buffer attachment with and image from the swap chain
+        // Single color buffer attachment with an image from the swap chain
         VkAttachmentDescription colorAttachment{};
         colorAttachment.format = swapChainImageFormat;                  // Match the image format of the swap chain
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;                // No multisampling so only 1 sample
@@ -1030,16 +956,6 @@ private:
     // ------------------------- Drawing Section ------------------------- //
     std::vector<VkFramebuffer> swapChainFramebuffers;
     VkCommandPool commandPool;
-    /*
-    VkCommandBuffer commandBuffer;
-
-    // Synchronization variables
-    std::vector<VkSemaphore> renderFinishedSemaphores;
-    VkSemaphore imageAvailableSemaphore;
-    VkFence inFlightFence;
-    */
-
-    // One command buffer and one of each synchronization object for each frame in flight
     std::vector<VkCommandBuffer> commandBuffers;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
@@ -1145,7 +1061,7 @@ private:
         scissor.extent = swapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        vkCmdDraw(commandBuffer, 4, 1, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);      // End the render pass
 
@@ -1180,7 +1096,7 @@ private:
 
         VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
         VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};                        // Which pipeline stage waits on semaphore
-        submitInfo.waitSemaphoreCount = 1;                                                                          //  How many Semaphores to wait for
+        submitInfo.waitSemaphoreCount = 1;                                                                          // How many Semaphores to wait for
         submitInfo.pWaitSemaphores = waitSemaphores;                                                                // What to wait for
         submitInfo.pWaitDstStageMask = waitStages;
         // Which command buffers submit for execution
@@ -1197,7 +1113,7 @@ private:
 
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        // What semaphores to wait on before the draw occurs
+        // Wait for rendering to finish before presenting
         presentInfo.waitSemaphoreCount = 1;
         presentInfo.pWaitSemaphores = signalSemaphores;
         // Which swap chain should the images be presented to and the index of the image to be presented
@@ -1205,7 +1121,7 @@ private:
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = swapChains;
         presentInfo.pImageIndices = &imageIndex;
-        presentInfo.pResults = nullptr; // Optional     // Specify and array of VkResult values to check for every individual swap chain if presentation was successful
+        presentInfo.pResults = nullptr; // Optional     // Specify an array of VkResult values to check for every individual swap chain if presentation was successful
 
         result = vkQueuePresentKHR(presentQueue, &presentInfo);
 
@@ -1222,7 +1138,6 @@ private:
 
     void createSyncObjects() {
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        renderFinishedSemaphores.resize(swapChainImages.size());
         inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
         // Create semaphores
@@ -1242,13 +1157,19 @@ private:
                 throw std::runtime_error("failed to create synchronization objects for a frame!");
             }
         }
+
+        createRenderFinishedSemaphores();
+    }
+    // Separate creation of RenderFinishedSemaphores (So it can be called separately on recreateSwapChain()
+    void createRenderFinishedSemaphores() {
+        renderFinishedSemaphores.resize(swapChainImages.size());
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
         for (size_t i = 0; i < swapChainImages.size(); i++) {
             if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create synchronization objects for a frame!");
             }
         }
     }
-
-
-
 };
