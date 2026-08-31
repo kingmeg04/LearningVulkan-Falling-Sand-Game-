@@ -27,6 +27,7 @@
 #include <bit>
 #include <algorithm>
 #include <limits>
+#include <chrono>
 
 // Console/Filesystems
 #include <iostream>
