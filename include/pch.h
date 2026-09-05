@@ -18,6 +18,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+// STB
+#include "../lib/stb/stb_image.h"
+
 // Standard libraries
 // Types
 #include <vector>

@@ -22,6 +22,7 @@ add_executable(VulkanLearning
     # headers
     include/pch.h
     src/Triangle.cpp
+    src/stb_image.cpp
 )
 
 # Precompiled header
@@ -44,7 +45,7 @@ target_link_libraries(VulkanLearning PRIVATE
 # Shader compiler
 find_program(GLSLC glslc REQUIRED)
 
-set(SHADER_DIR ${CMAKE_SOURCE_DIR}/shaders)
+set(SHADER_DIR ${CMAKE_SOURCE_DIR}/resources/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
 
 set(SHADERS
@@ -53,6 +54,9 @@ set(SHADERS
 
         ${SHADER_DIR}/shader2/shader2.vert
         ${SHADER_DIR}/shader2/shader2.frag
+
+        ${SHADER_DIR}/shader3/shader3.vert
+        ${SHADER_DIR}/shader3/shader3.frag
 )
 
 set(SPIRV_SHADERS)
