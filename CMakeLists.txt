@@ -49,14 +49,17 @@ set(SHADER_DIR ${CMAKE_SOURCE_DIR}/resources/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders)
 
 set(SHADERS
-        ${SHADER_DIR}/shader1/shader1.vert
         ${SHADER_DIR}/shader1/shader1.frag
+        ${SHADER_DIR}/shader1/shader1.vert
 
-        ${SHADER_DIR}/shader2/shader2.vert
         ${SHADER_DIR}/shader2/shader2.frag
+        ${SHADER_DIR}/shader2/shader2.vert
 
-        ${SHADER_DIR}/shader3/shader3.vert
         ${SHADER_DIR}/shader3/shader3.frag
+        ${SHADER_DIR}/shader3/shader3.vert
+
+        ${SHADER_DIR}/shader4/shader4.frag
+        ${SHADER_DIR}/shader4/shader4.vert
 )
 
 set(SPIRV_SHADERS)
