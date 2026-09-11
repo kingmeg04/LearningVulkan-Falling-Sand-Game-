@@ -41,7 +41,22 @@ struct Vertex {
 
         return attributeDescriptions;
     }
+
+    // Overload == to allow custom operations
+    bool operator==(const Vertex& other) const {
+        return pos == other.pos && color == other.color && texCoord == other.texCoord;
+    }
 };
+// Fix for unordered map constructor
+namespace std {
+    template<> struct hash<Vertex> {
+        size_t operator()(Vertex const& vertex) const {
+            return ((hash<glm::vec3>()(vertex.pos) ^
+                   (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+                   (hash<glm::vec2>()(vertex.texCoord) << 1);
+        }
+    };
+}
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -51,10 +66,14 @@ struct UniformBufferObject {
 
 class HelloTriangleApplication {
 public:
-    const std::string compilerOutput = "../cmake-build-debug/";
+    const std::string COMPILER_OUT = "../cmake-build-debug/";
+    const std::string RESOURCES = "../resources/";
 
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
+
+    const std::string MODEL_PATH = RESOURCES + "models/viking_room.obj";
+    const std::string TEXTURE_PATH = RESOURCES + "textures/viking_room.png";
 
     const int MAX_FRAMES_IN_FLIGHT = 2;     // Not too large so the cpu doesn't get too far ahead of the GPU, which would cause latency
 
@@ -125,6 +144,8 @@ private:
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
+
+        loadModel();
 
         createVertexBuffer();
         createIndexBuffer();
@@ -777,8 +798,8 @@ private:
     VkPipeline graphicsPipeline;
 
     void createGraphicsPipeline() {
-        auto vertShaderCode = readFile(compilerOutput + "shaders/shader4.vert.spv");
-        auto fragShaderCode = readFile(compilerOutput + "shaders/shader4.frag.spv");
+        auto vertShaderCode = readFile(COMPILER_OUT + "shaders/shader4.vert.spv");
+        auto fragShaderCode = readFile(COMPILER_OUT + "shaders/shader4.frag.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -1090,6 +1111,7 @@ private:
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
 
+    /*
     const std::vector<Vertex> vertices = {
         {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
         {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
@@ -1106,6 +1128,10 @@ private:
         0, 1, 2, 2, 3, 0,
         4, 5, 6, 6, 7, 4
     };
+    */
+
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
 
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
         std::vector<uint32_t> queueFamilyIndices = convertQueueFamiliesFormat(selectedQueueFamilies);
@@ -1479,7 +1505,7 @@ private:
         VkDeviceSize offsets[] = {0};
         // Bind the index and vertex buffers
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
@@ -1644,7 +1670,8 @@ private:
     void createTextureImage() {
         // Load the image with the stb library
         int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load("../resources/textures/texture1.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        // stbi_uc* pixels = stbi_load(RESOURCES + "textures/texture1.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels) {
@@ -1845,6 +1872,58 @@ private:
             1,
             &region
         );
+    }
+
+    // ----- Loading Models ----- //
+
+    void loadModel() {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn;
+        std::string err;
+
+        if (!tinyobj::LoadObj(
+            &attrib,
+            &shapes,
+            &materials,
+            &warn,
+            &err,
+            MODEL_PATH.c_str()))
+        {
+            throw std::runtime_error(warn + err);
+        }
+
+        // Used to get rid of duplicate vertices
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+        // Combine all faces into a single model
+        for (const auto& shape : shapes) {
+            for (const auto& index : shape.mesh.indices) {
+                Vertex vertex{};
+
+                // Set the vertices
+                vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+                // Set the texture coordinates for the model
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0 - attrib.texcoords[2 * index.texcoord_index + 1]    // inverted formet of OpenGL
+                };
+
+                vertex.color = {1.0f, 1.0f, 1.0f};
+
+                if (uniqueVertices.count(vertex) == 0) {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(vertex);
+                }
+
+                indices.push_back(uniqueVertices[vertex]);
+            }
+        }
     }
 
     // ----- Depth Buffering ----- //

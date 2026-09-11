@@ -10,5 +10,5 @@ layout(location = 0) out vec4 outColor;
 
 void main() {
     vec2 screenPos = gl_FragCoord.xy;
-    outColor = vec4(screenPos / vec2(800, 600), texture(texSampler, fragTexCoord).b,1.0);
+    outColor = vec4(texture(texSampler, fragTexCoord).rgb,1.0);
 }

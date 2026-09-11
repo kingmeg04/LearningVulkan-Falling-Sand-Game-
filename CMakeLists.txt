@@ -21,8 +21,8 @@ add_executable(VulkanLearning
 
     # headers
     include/pch.h
+    include/pch.cpp
     src/Triangle.cpp
-    src/stb_image.cpp
 )
 
 # Precompiled header
