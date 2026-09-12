@@ -23,6 +23,9 @@ add_executable(VulkanLearning
     include/pch.h
     include/pch.cpp
     src/Triangle.cpp
+        src/input.cpp
+        src/input.cpp
+        include/input.h
 )
 
 # Precompiled header

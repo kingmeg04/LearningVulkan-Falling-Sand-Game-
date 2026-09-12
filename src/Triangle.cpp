@@ -1,4 +1,6 @@
 #include "pch.h"
+#include "input.h"
+
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
@@ -72,7 +74,7 @@ public:
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
 
-    const std::string MODEL_PATH = RESOURCES + "models/viking_room.obj";
+    const std::string MODEL_PATH = RESOURCES + "models/plane.obj";
     const std::string TEXTURE_PATH = RESOURCES + "textures/viking_room.png";
 
     const int MAX_FRAMES_IN_FLIGHT = 2;     // Not too large so the cpu doesn't get too far ahead of the GPU, which would cause latency
@@ -100,7 +102,11 @@ public:
         cleanup();
     }
 
+    double_t cameraDist = 2.0;
+    float_t cameraRot = 1.0;
+
 private:
+    Input *input;
 
     // ========================= Setup Section ========================= //
     GLFWwindow *window;
@@ -122,6 +128,8 @@ private:
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);      // Attaches a pointer to "this" to associate the app instance with the window so callbacks can retrieve it
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+
+        input = new Input(window);
     }
 
     void initVulkan() {
@@ -158,9 +166,27 @@ private:
         createSyncObjects();
     }
 
+    short prevScroll = 0;
     void mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
+            input->update();
+            if (input->scrollY_ != prevScroll) {
+                short diff = prevScroll - input->scrollY_;
+                if (cameraDist > 0.1)
+                    cameraDist += diff * 0.1f;
+                else if (diff > 0.1)
+                    cameraDist += diff * 0.1f;
+
+                prevScroll = input->scrollY_;
+                std::cout << input->scrollY_ << std::endl;
+            }
+
+            if (input->mouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
+                std::cout << "E" << std::endl;
+                cameraRot += input->mouseDelta().x * 0.01f;
+            }
+
             drawFrame();
         }
     }
@@ -1359,9 +1385,9 @@ private:
         // Define the movement of the object using MVP projection
         UniformBufferObject ubo{};
         // Model
-        ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
         // View
-        ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = glm::lookAt(glm::vec3(sin(cameraRot) * cameraDist, cos(cameraRot) * cameraDist, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         // Projection
         ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
         ubo.proj[1][1] *= -1; // Invert the y coordinates because of OpenGL vs Vulkan coordinate system
@@ -1781,7 +1807,7 @@ private:
         // Mipmap configuration
         samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
         samplerInfo.mipLodBias = 0.0f; // Optional
-        samplerInfo.minLod = static_cast<float>(mipLevels / 2);; // Optional
+        samplerInfo.minLod = 0.0f; // Optional
         samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
 
         if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
