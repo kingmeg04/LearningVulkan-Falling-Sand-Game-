@@ -9,6 +9,9 @@ Input::Input(GLFWwindow* window)
 
 void Input::update()
 {
+    prevTime = curTime;
+    curTime = std::chrono::high_resolution_clock::now();
+
     previousMousePos = mousePos;
 
     double x, y;
@@ -16,6 +19,11 @@ void Input::update()
 
     mousePos = glm::vec2(x, y);
     mouseDeltaValue = mousePos - previousMousePos;
+}
+
+float Input::getDelta() const
+{
+    return std::chrono::duration<float>(curTime - prevTime).count();
 }
 
 bool Input::keyDown(int key) const

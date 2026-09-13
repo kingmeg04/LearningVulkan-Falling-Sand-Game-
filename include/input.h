@@ -16,6 +16,8 @@ public:
 
     void update();
 
+    float getDelta() const;
+
     bool keyDown(int key) const;
 
     bool mouseButtonDown(int button) const;
@@ -24,6 +26,9 @@ public:
     glm::vec2 mouseDelta() const;
 
 private:
+    std::chrono::time_point<std::chrono::system_clock> prevTime;
+    std::chrono::time_point<std::chrono::system_clock> curTime;
+
     GLFWwindow* window;
 
     glm::vec2 mousePos{0.0f};

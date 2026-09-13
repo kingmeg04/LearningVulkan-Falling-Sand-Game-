@@ -74,7 +74,7 @@ public:
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
 
-    const std::string MODEL_PATH = RESOURCES + "models/plane.obj";
+    const std::string MODEL_PATH = RESOURCES + "models/viking_room.obj";
     const std::string TEXTURE_PATH = RESOURCES + "textures/viking_room.png";
 
     const int MAX_FRAMES_IN_FLIGHT = 2;     // Not too large so the cpu doesn't get too far ahead of the GPU, which would cause latency
@@ -166,26 +166,47 @@ private:
         createSyncObjects();
     }
 
-    short prevScroll = 0;
+    float prevScroll = 0;
+
+    // ----- Camera rotation state ----- //
+    float angularVelocity = 0.0f;   // radians/sec, current spin speed
+    const float rotSensitivity = 0.006f;  // tune: rad/sec per pixel/sec
+    const float rotSmoothTime  = 0.01f;   // how quickly velocity catches up to input while dragging
+    const float rotDecayRate   = 4.0f;    // higher = stops faster after release
+    const float rotStopEpsilon = 0.001f;  // snap to zero below this speed
+
     void mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
             input->update();
+
+            float dt = input->getDelta(); // assumed seconds; adjust if it's ms
+
+            // ---- Zoom (unchanged logic, just cleaned up) ----
             if (input->scrollY_ != prevScroll) {
                 short diff = prevScroll - input->scrollY_;
-                if (cameraDist > 0.1)
-                    cameraDist += diff * 0.1f;
-                else if (diff > 0.1)
-                    cameraDist += diff * 0.1f;
-
+                cameraDist += diff * 0.1f;
+                if (cameraDist < 0.1) cameraDist = 0.1;
                 prevScroll = input->scrollY_;
-                std::cout << input->scrollY_ << std::endl;
             }
 
-            if (input->mouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
-                std::cout << "E" << std::endl;
-                cameraRot += input->mouseDelta().x * 0.01f;
+            // ---- Rotation ----
+            if (input->mouseButtonDown(GLFW_MOUSE_BUTTON_LEFT) && dt > 0.0f) {
+                float targetVelocity = (input->mouseDelta().x / dt) * rotSensitivity;
+
+                // Exponential smoothing toward target velocity, framerate-independent
+                float alpha = 1.0f - std::exp(-dt / rotSmoothTime);
+                angularVelocity += (targetVelocity - angularVelocity) * alpha;
+            } else {
+                // Exponential decay ("ease out") toward zero, framerate-independent
+                angularVelocity *= std::exp(-rotDecayRate * dt);
+                if (std::abs(angularVelocity) < rotStopEpsilon)
+                    angularVelocity = 0.0f;
             }
+
+            cameraRot += angularVelocity * dt;
+            while (cameraRot > 2 * std::numbers::pi) cameraRot -= 2 * std::numbers::pi;
+            while (cameraRot < -2 * std::numbers::pi) cameraRot += 2 * std::numbers::pi;
 
             drawFrame();
         }
@@ -1377,17 +1398,13 @@ private:
     }
 
     void updateUniformBuffer(uint32_t currentImage) {
-        static auto startTime = std::chrono::high_resolution_clock::now();
-
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
         // Define the movement of the object using MVP projection
         UniformBufferObject ubo{};
         // Model
-        ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         // View
-        ubo.view = glm::lookAt(glm::vec3(sin(cameraRot) * cameraDist, cos(cameraRot) * cameraDist, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = glm::lookAt(glm::vec3(sin(cameraRot) * cameraDist, cos(cameraRot) * cameraDist, 1.5f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         // Projection
         ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
         ubo.proj[1][1] *= -1; // Invert the y coordinates because of OpenGL vs Vulkan coordinate system
