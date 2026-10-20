@@ -1,3 +1,5 @@
+#include <random>
+
 #include "pch.h"
 #include "input.h"
 
@@ -49,6 +51,12 @@ struct Vertex {
         return pos == other.pos && color == other.color && texCoord == other.texCoord;
     }
 };
+
+struct Particle {
+    glm::vec2 position;
+    glm::vec2 velocity;
+    glm::vec4 color;
+};
 // Fix for unordered map constructor
 namespace std {
     template<> struct hash<Vertex> {
@@ -83,11 +91,13 @@ public:
         "VK_LAYER_KHRONOS_validation"
     };
 
-    const VkQueueFlags requiredQueueFlags = VK_QUEUE_GRAPHICS_BIT; //| VK_QUEUE_TRANSFER_BIT; // VK_QUEUE_TRANSFER_BIT is implied by VK_QUEUE_GRAPHICS_BIT so it's not really necessary
+    const VkQueueFlags requiredQueueFlags = VK_QUEUE_GRAPHICS_BIT; // VK_QUEUE_TRANSFER_BIT is implied by VK_QUEUE_GRAPHICS_BIT so it's not really necessary
 
     const std::vector<const char*> deviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
+
+    const uint32_t PARTICLE_COUNT = 1000;
 
     #ifdef NDEBUG
         const bool enableValidationLayers = false;
@@ -389,19 +399,18 @@ private:
     }
 
     void createLogicalDevice() {
+        // TODO: seperate graphics and compute queue families
         std::vector<uint32_t> indices = findQueueFamilies(physicalDevice, requiredQueueFlags);
         if (indices.size() <= 0)
             throw std::runtime_error("No compatible queue family found!");
-
-
 
         // Check if any of the families with support also support present
         VkBool32 presentSupport = false;
         for (uint32_t candidate : indices) {
             vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, candidate, surface, &presentSupport);
             if (presentSupport) {
-                selectedQueueFamilies.emplace_back(candidate, requiredQueueFlags);
-                selectedQueueFamilies.emplace_back(findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT);
+                FIQueueFamily(selectedQueueFamilies, candidate, requiredQueueFlags); // selectedQueueFamilies.emplace_back(candidate, requiredQueueFlags);
+                FIQueueFamily(selectedQueueFamilies, findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT); // selectedQueueFamilies.emplace_back(findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT);
                 // Guaranteed to succeed since VK_QUEUE_GRAPHICS_BIT implies VK_QUEUE_TRANSFER_BIT //
                 break;
             }
@@ -410,15 +419,15 @@ private:
         // If no ideal family was found, find another family with present support
         if (!presentSupport) {
 
-            selectedQueueFamilies.emplace_back(indices[0], requiredQueueFlags);
-            selectedQueueFamilies.emplace_back(findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT);
+            FIQueueFamily(selectedQueueFamilies, indices[0], requiredQueueFlags); // selectedQueueFamilies.emplace_back(indices[0], requiredQueueFlags);
+            FIQueueFamily(selectedQueueFamilies, findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT); // selectedQueueFamilies.emplace_back(findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT);
             // Guaranteed to succeed since VK_QUEUE_GRAPHICS_BIT implies VK_QUEUE_TRANSFER_BIT //
 
             indices = findQueueFamilies(physicalDevice, 0);
             for (uint32_t candidate : indices) {
                 vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, candidate, surface, &presentSupport);
                 if (presentSupport) {
-                    selectedQueueFamilies.emplace_back(candidate, 0);
+                    FIQueueFamily(selectedQueueFamilies, candidate, 0); // selectedQueueFamilies.emplace_back(candidate, 0);
                     break;
                 }
             }
@@ -462,7 +471,7 @@ private:
         }
 
         // Assign the graphicsQueue to the Queue (This must have present support)
-        //vkGetDeviceQueue(device, *familyIndex, 0, &graphicsQueue);
+        // vkGetDeviceQueue(device, *familyIndex, 0, &graphicsQueue);
         vkGetDeviceQueue(device, selectedQueueFamilies[0].first, 0, &graphicsQueue);
         vkGetDeviceQueue(device, selectedQueueFamilies[1].first, 0, &transferQueue);
 
@@ -471,6 +480,30 @@ private:
         } else {
             vkGetDeviceQueue(device, selectedQueueFamilies[0].first, 0, &presentQueue);  // same family, same queue
         }
+    }
+    // Helper to use for adding/finding queueFamilies.
+    // Keeps the queueFamilies sorted and uses binary search to find if the family already exists/isSet
+    int FIQueueFamily(
+    std::vector<std::pair<uint32_t, VkQueueFlags>>& queueFamilies,
+    uint32_t familyIndex,
+    VkQueueFlags requestedFlags)
+    {
+        auto it = std::lower_bound(
+            queueFamilies.begin(),
+            queueFamilies.end(),
+            requestedFlags,
+            [](const auto& entry, VkQueueFlags flags) {
+                return entry.second < flags;
+            });
+
+        if (it != queueFamilies.end() && it->second == requestedFlags)
+            return static_cast<int>(it - queueFamilies.begin());
+
+        const auto position = it - queueFamilies.begin();
+
+        queueFamilies.insert(it, {familyIndex, requestedFlags});
+
+        return -static_cast<int>(position) - 1;
     }
 
     bool isDeviceSuitable(VkPhysicalDevice device) {
@@ -875,8 +908,13 @@ private:
         auto vertShaderCode = readFile(COMPILER_OUT + "shaders/shader4.vert.spv");
         auto fragShaderCode = readFile(COMPILER_OUT + "shaders/shader4.frag.spv");
 
+        auto compShaderCode = readFile(COMPILER_OUT + "shaders/shader4.comp.spv");
+
+
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+        VkShaderModule compShaderModule = createShaderModule(compShaderCode);
 
         // To actually use the shaders we need to assign them to a specific pipeline stage
         VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
@@ -892,6 +930,12 @@ private:
         fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         fragShaderStageInfo.module = fragShaderModule;
         fragShaderStageInfo.pName = "main";
+
+        VkPipelineShaderStageCreateInfo computeShaderStageInfo{};
+        computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        computeShaderStageInfo.module = compShaderModule;
+        computeShaderStageInfo.pName = "main";
 
         // Put the pipeline stages into an array to be used in a later step
         VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
@@ -1329,6 +1373,9 @@ private:
     std::vector<VkDeviceMemory> uniformBuffersMemory;
     std::vector<void*> uniformBuffersMapped;
 
+    std::vector<VkBuffer> shaderStorageBuffers;
+    std::vector<VkDeviceMemory> shaderStorageBuffersMemory;
+
     void createDescriptorSetLayout() {
         VkDescriptorSetLayoutBinding uboLayoutBinding{};
         uboLayoutBinding.binding = 0;
@@ -1456,6 +1503,47 @@ private:
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
+    void createShaderStorageBuffers() {
+
+        shaderStorageBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        shaderStorageBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+
+
+        // TODO: move to seperate function
+        // Initialize particles
+        std::default_random_engine rndEngine((unsigned)time(nullptr));
+        std::uniform_real_distribution<float> rndDist(0.0f, 1.0f);
+
+        // Initial particle positions on a circle
+        std::vector<Particle> particles(PARTICLE_COUNT);
+        for (auto& particle : particles) {
+            float r = 0.25f * sqrt(rndDist(rndEngine));
+            float theta = rndDist(rndEngine) * 2 * 3.14159265358979323846;
+            float x = r * cos(theta) * HEIGHT / WIDTH;
+            float y = r * sin(theta);
+            particle.position = glm::vec2(x, y);
+            particle.velocity = glm::normalize(glm::vec2(x,y)) * 0.00025f;
+            particle.color = glm::vec4(rndDist(rndEngine), rndDist(rndEngine), rndDist(rndEngine), 1.0f);
+        }
+
+
+        VkDeviceSize bufferSize = sizeof(Particle) * PARTICLE_COUNT;
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, particles.data(), (size_t)bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            createBuffer(bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, shaderStorageBuffers[i], shaderStorageBuffersMemory[i]);
+            // Copy data from the staging buffer (host) to the shader storage buffer (GPU)
+            copyBuffer(stagingBuffer, shaderStorageBuffers[i], bufferSize);
+        }
+    }
 
 
 
