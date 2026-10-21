@@ -123,11 +123,19 @@ private:
     VkInstance instance;
     VkPhysicalDevice physicalDevice;
     VkDevice device;
+
     VkQueue graphicsQueue;
-    VkQueue presentQueue;
+    VkQueue computeQueue;
     VkQueue transferQueue;
+    VkQueue presentQueue;
+
+    uint32_t graphicsFamilyIndex;
+    uint32_t computeFamilyIndex;
+    uint32_t transferFamilyIndex;
+    uint32_t presentFamilyIndex;
 
     std::vector<std::pair<uint32_t, VkQueueFlags>> selectedQueueFamilies;
+    uint32_t presentFlags;
 
     void initWindow() {
         glfwInit();
@@ -399,54 +407,65 @@ private:
     }
 
     void createLogicalDevice() {
-        // TODO: seperate graphics and compute queue families
-        std::vector<uint32_t> indices = findQueueFamilies(physicalDevice, requiredQueueFlags);
-        if (indices.size() <= 0)
-            throw std::runtime_error("No compatible queue family found!");
+        std::vector<uint32_t> graphicsFamily = findQueueFamilies(physicalDevice, VK_QUEUE_GRAPHICS_BIT);
+        std::vector<uint32_t> computeFamily  = findQueueFamilies(physicalDevice, VK_QUEUE_COMPUTE_BIT);
+        std::vector<uint32_t> transferFamily = findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT);
+
+        if (graphicsFamily.empty() || computeFamily.empty() || transferFamily.empty())
+            throw std::runtime_error("Required queue family not found!");
+
+        computeFamilyIndex = computeFamily[0];
+        transferFamilyIndex = transferFamily[0];
+        FIQueueFamily(selectedQueueFamilies, computeFamilyIndex,  VK_QUEUE_COMPUTE_BIT);
+        FIQueueFamily(selectedQueueFamilies, transferFamilyIndex, VK_QUEUE_TRANSFER_BIT);
 
         // Check if any of the families with support also support present
         VkBool32 presentSupport = false;
-        for (uint32_t candidate : indices) {
+        for (uint32_t candidate : graphicsFamily) {
             vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, candidate, surface, &presentSupport);
             if (presentSupport) {
-                FIQueueFamily(selectedQueueFamilies, candidate, requiredQueueFlags); // selectedQueueFamilies.emplace_back(candidate, requiredQueueFlags);
-                FIQueueFamily(selectedQueueFamilies, findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT); // selectedQueueFamilies.emplace_back(findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT);
-                // Guaranteed to succeed since VK_QUEUE_GRAPHICS_BIT implies VK_QUEUE_TRANSFER_BIT //
+                graphicsFamilyIndex = presentFamilyIndex = candidate;
+                FIQueueFamily(selectedQueueFamilies, graphicsFamilyIndex, VK_QUEUE_GRAPHICS_BIT); // selectedQueueFamilies.emplace_back(candidate, requiredQueueFlags);
+                presentFlags = VK_QUEUE_GRAPHICS_BIT;
                 break;
             }
         }
 
         // If no ideal family was found, find another family with present support
         if (!presentSupport) {
-
-            FIQueueFamily(selectedQueueFamilies, indices[0], requiredQueueFlags); // selectedQueueFamilies.emplace_back(indices[0], requiredQueueFlags);
-            FIQueueFamily(selectedQueueFamilies, findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT); // selectedQueueFamilies.emplace_back(findQueueFamilies(physicalDevice, VK_QUEUE_TRANSFER_BIT)[0], VK_QUEUE_TRANSFER_BIT);
-            // Guaranteed to succeed since VK_QUEUE_GRAPHICS_BIT implies VK_QUEUE_TRANSFER_BIT //
-
-            indices = findQueueFamilies(physicalDevice, 0);
+            graphicsFamilyIndex = graphicsFamily[0];
+            FIQueueFamily(selectedQueueFamilies, graphicsFamilyIndex, VK_QUEUE_GRAPHICS_BIT); // selectedQueueFamilies.emplace_back(indices[0], requiredQueueFlags);
+            std::vector<uint32_t> indices = findQueueFamilies(physicalDevice, 0);
             for (uint32_t candidate : indices) {
                 vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, candidate, surface, &presentSupport);
                 if (presentSupport) {
-                    FIQueueFamily(selectedQueueFamilies, candidate, 0); // selectedQueueFamilies.emplace_back(candidate, 0);
+                    presentFamilyIndex = candidate;
+                    FIQueueFamily(selectedQueueFamilies, presentFamilyIndex, 0); // selectedQueueFamilies.emplace_back(candidate, 0);
+                    presentFlags = 0;
                     break;
                 }
             }
-
             if (!presentSupport)
                 throw std::runtime_error("failed to find a supporting device!");
         }
 
-
+        std::vector<uint32_t> uniqueFamilies;
+        for (const auto& [family, flags] : selectedQueueFamilies) {
+            auto it = std::lower_bound(uniqueFamilies.begin(), uniqueFamilies.end(), family);
+            if (it == uniqueFamilies.end() || *it != family)
+                uniqueFamilies.insert(it, family);
+        }
 
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-        float queuePriority = 1.0f; // (range from 0.0 - 1.0)
+        float queuePriority = 1.0f;
 
-        for (const auto& [family, flags] : selectedQueueFamilies) {
+        for (uint32_t family : uniqueFamilies) {
             VkDeviceQueueCreateInfo queueCreateInfo{};                                      // Creating the queues for the queueFamily
             queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
             queueCreateInfo.queueFamilyIndex = family;
             queueCreateInfo.queueCount = 1;                                                 // How many Queues should the family have
             queueCreateInfo.pQueuePriorities = &queuePriority;                              // The priority of the queue
+
             queueCreateInfos.push_back(queueCreateInfo);
         }
         VkPhysicalDeviceFeatures deviceFeatures{};                                          // Features that should be enabled
@@ -472,26 +491,15 @@ private:
 
         // Assign the graphicsQueue to the Queue (This must have present support)
         // vkGetDeviceQueue(device, *familyIndex, 0, &graphicsQueue);
-        vkGetDeviceQueue(device, selectedQueueFamilies[0].first, 0, &graphicsQueue);
-        vkGetDeviceQueue(device, selectedQueueFamilies[1].first, 0, &transferQueue);
-
-        if (selectedQueueFamilies.size() > 2) {
-            vkGetDeviceQueue(device, selectedQueueFamilies[2].first, 0, &presentQueue);
-        } else {
-            vkGetDeviceQueue(device, selectedQueueFamilies[0].first, 0, &presentQueue);  // same family, same queue
-        }
+        vkGetDeviceQueue(device, graphicsFamilyIndex, 0, &graphicsQueue);
+        vkGetDeviceQueue(device, computeFamilyIndex, 0, &computeQueue);
+        vkGetDeviceQueue(device, transferFamilyIndex, 0, &transferQueue);
+        vkGetDeviceQueue(device, presentFamilyIndex, 0, &presentQueue);
     }
     // Helper to use for adding/finding queueFamilies.
     // Keeps the queueFamilies sorted and uses binary search to find if the family already exists/isSet
-    int FIQueueFamily(
-    std::vector<std::pair<uint32_t, VkQueueFlags>>& queueFamilies,
-    uint32_t familyIndex,
-    VkQueueFlags requestedFlags)
-    {
-        auto it = std::lower_bound(
-            queueFamilies.begin(),
-            queueFamilies.end(),
-            requestedFlags,
+    int FIQueueFamily(std::vector<std::pair<uint32_t, VkQueueFlags>>& queueFamilies, uint32_t familyIndex, VkQueueFlags requestedFlags) {
+        auto it = std::lower_bound(queueFamilies.begin(),  queueFamilies.end(), requestedFlags,
             [](const auto& entry, VkQueueFlags flags) {
                 return entry.second < flags;
             });
@@ -500,6 +508,10 @@ private:
             return static_cast<int>(it - queueFamilies.begin());
 
         const auto position = it - queueFamilies.begin();
+
+        // use ~0 as flag for search only
+        if (familyIndex == ~0u)
+            throw std::runtime_error("Family doesn't exist!");
 
         queueFamilies.insert(it, {familyIndex, requestedFlags});
 
