@@ -542,13 +542,28 @@ private:
     }
 
     // Check all features required from the device
-    bool deviceFeatureSupport(VkPhysicalDeviceFeatures deviceFeatures) {
-        return (deviceFeatures.geometryShader);
+    bool deviceFeatureSupport(VkPhysicalDeviceFeatures features) {
+        return features.geometryShader &&
+               features.samplerAnisotropy;
     }
 
     // Check all families required from the device
     bool deviceFamilySupport(VkPhysicalDevice device) {
-        return findQueueFamily(device, requiredQueueFlags).has_value();
+        std::vector<uint32_t> graphics = findQueueFamilies(device, VK_QUEUE_GRAPHICS_BIT);
+        std::vector<uint32_t> compute  = findQueueFamilies(device, VK_QUEUE_COMPUTE_BIT);
+        std::vector<uint32_t> transfer = findQueueFamilies(device, VK_QUEUE_TRANSFER_BIT);
+
+        if (graphics.empty() || compute.empty() || transfer.empty())
+            return false;
+
+        for (uint32_t family : findQueueFamilies(device, 0)) {
+            VkBool32 presentSupport = VK_FALSE; // not all required families are supported
+
+            if (vkGetPhysicalDeviceSurfaceSupportKHR(device, family, surface, &presentSupport) == VK_SUCCESS && presentSupport)
+                return true; // Check if present is supported
+        }
+
+        return false;
     }
 
     // Check all extensions required from the device
