@@ -934,17 +934,23 @@ private:
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
 
+    VkPipelineLayout computePipelineLayout;
+    VkPipeline computePipeline;
+
     void createGraphicsPipeline() {
         auto vertShaderCode = readFile(COMPILER_OUT + "shaders/shader4.vert.spv");
         auto fragShaderCode = readFile(COMPILER_OUT + "shaders/shader4.frag.spv");
 
+        /*
         auto compShaderCode = readFile(COMPILER_OUT + "shaders/shader5.comp.spv");
-
+        */
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
 
+        /*
         VkShaderModule compShaderModule = createShaderModule(compShaderCode);
+        */
 
         // To actually use the shaders we need to assign them to a specific pipeline stage
         VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
@@ -961,11 +967,13 @@ private:
         fragShaderStageInfo.module = fragShaderModule;
         fragShaderStageInfo.pName = "main";
 
+        /*
         VkPipelineShaderStageCreateInfo computeShaderStageInfo{};
         computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
         computeShaderStageInfo.module = compShaderModule;
         computeShaderStageInfo.pName = "main";
+        */
 
         // Put the pipeline stages into an array to be used in a later step
         VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
@@ -1025,6 +1033,7 @@ private:
         viewportState.scissorCount = 1;
 
         // Without the dynamic state the viewport and scissor rectangle would need to be set the following way, making them immutable
+
         /*
         VkPipelineViewportStateCreateInfo viewportState{};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -1145,12 +1154,43 @@ private:
             throw std::runtime_error("failed to create graphics pipeline!");
         }
 
+
         // We can directly clear the shader modules again as it is only need to create the pipeline and not used after that
         // This means we're allowed to clear them directly after the graphics pipeline has been created
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
 
-        vkDestroyShaderModule(device, compShaderModule, nullptr);
+        // vkDestroyShaderModule(device, compShaderModule, nullptr);
+    }
+    void createComputePipeline() {
+        auto computeShaderCode = readFile(COMPILER_OUT + "shaders/shader5.comp.spv");
+        VkShaderModule computeShaderModule = createShaderModule(computeShaderCode);
+
+        VkPipelineShaderStageCreateInfo computeShaderStageInfo{};
+        computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        computeShaderStageInfo.module = computeShaderModule;
+        computeShaderStageInfo.pName = "main";
+
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &computeDescriptorSetLayout;
+
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute pipeline layout!");
+        }
+
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.layout = computePipelineLayout;
+        pipelineInfo.stage = computeShaderStageInfo;
+
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute pipeline!");
+        }
+
+        vkDestroyShaderModule(device, computeShaderModule, nullptr);
     }
 
     void createRenderPass() {
