@@ -17,10 +17,24 @@ layout(std140, binding = 2)          buffer ParticleSSBOOut { Particle particles
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
-    if (index >= particlesIn.length()) return;     // fixes the 1000 vs 1024 overrun
+    if (index >= particlesIn.length()) return;
 
     Particle p = particlesIn[index];
-    particlesOut[index].position = p.position + p.velocity.xy * ubo.deltaTime;
-    particlesOut[index].velocity = p.velocity;
+
+    vec2 newPos = p.position + p.velocity * ubo.deltaTime;
+    vec2 newVel = p.velocity;
+
+    // Bounce: flip the velocity component and clamp the position back inside
+    if (newPos.x <= -1.0 || newPos.x >= 1.0) {
+        newVel.x = -newVel.x;
+        newPos.x = clamp(newPos.x, -1.0, 1.0);
+    }
+    if (newPos.y <= -1.0 || newPos.y >= 1.0) {
+        newVel.y = -newVel.y;
+        newPos.y = clamp(newPos.y, -1.0, 1.0);
+    }
+
+    particlesOut[index].position = newPos;
+    particlesOut[index].velocity = newVel;
     particlesOut[index].color    = p.color;
 }

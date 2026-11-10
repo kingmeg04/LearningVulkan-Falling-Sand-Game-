@@ -1759,7 +1759,7 @@ private:
     void updateComputeUniformBuffer(uint32_t currentImage) {
         ComputeUniformBufferObject ubo{};
         float dt = input->getDelta();
-        ubo.deltaTime = 100 * dt;
+        ubo.deltaTime = 1000 * dt;
         memcpy(computeUniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
