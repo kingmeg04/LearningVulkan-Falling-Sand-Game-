@@ -233,9 +233,10 @@ private:
             glfwPollEvents();
             input->update();
 
-            float dt = input->getDelta(); // assumed seconds; adjust if it's ms
+            float dt = input->getDelta();
+            // std::cout << dt << std::endl;
 
-            // ---- Zoom (unchanged logic, just cleaned up) ----
+            // Zoom
             if (input->scrollY_ != prevScroll) {
                 short diff = prevScroll - input->scrollY_;
                 cameraDist += diff * 0.1f;
@@ -243,7 +244,7 @@ private:
                 prevScroll = input->scrollY_;
             }
 
-            // ---- Rotation ----
+            // Rotation
             if (input->mouseButtonDown(GLFW_MOUSE_BUTTON_LEFT) && dt > 0.0f) {
                 float targetVelocity = (input->mouseDelta().x / dt) * rotSensitivity;
 
@@ -1757,7 +1758,8 @@ private:
     }
     void updateComputeUniformBuffer(uint32_t currentImage) {
         ComputeUniformBufferObject ubo{};
-        ubo.deltaTime = 0.016f; // input->getDelta(); // TODO: fix delta
+        float dt = input->getDelta();
+        ubo.deltaTime = 100 * dt; // TODO: fix delta
         memcpy(computeUniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
@@ -2134,7 +2136,7 @@ private:
             throw std::runtime_error("failed to acquire swap chain image!");
         }
 
-        // --- Compute ---
+        // Compute
         vkWaitForFences(device, 1, &computeInFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
         updateComputeUniformBuffer(currentFrame);
         vkResetFences(device, 1, &computeInFlightFences[currentFrame]);
@@ -2152,7 +2154,7 @@ private:
         if (vkQueueSubmit(computeQueue, 1, &computeSubmit, computeInFlightFences[currentFrame]) != VK_SUCCESS)
             throw std::runtime_error("failed to submit compute command buffer!");
 
-        // --- Graphics ---
+        // Graphics
         updateUniformBuffer(currentFrame);
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
@@ -2176,7 +2178,7 @@ private:
         if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS)
             throw std::runtime_error("failed to submit draw command buffer!");
 
-        // --- Present (unchanged) ---
+        // Present
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;

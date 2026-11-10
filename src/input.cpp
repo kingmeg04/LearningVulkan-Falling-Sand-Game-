@@ -23,7 +23,8 @@ void Input::update()
 
 float Input::getDelta() const
 {
-    return std::chrono::duration<float>(curTime - prevTime).count();
+    float res = std::chrono::duration<float>(curTime - prevTime).count();
+    return res > 1.0f ? 0.0f : res;
 }
 
 bool Input::keyDown(int key) const
