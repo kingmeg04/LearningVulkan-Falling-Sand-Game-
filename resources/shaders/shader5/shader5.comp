@@ -1,6 +1,8 @@
 #version 450
 
-layout (binding = 0) uniform ParameterUBO {
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0) uniform ParameterUBO {
     float deltaTime;
 } ubo;
 
@@ -10,22 +12,15 @@ struct Particle {
     vec4 color;
 };
 
-layout(std140, binding = 1) readonly buffer ParticleSSBOIn {
-   Particle particlesIn[ ];
-};
+layout(std140, binding = 1) readonly buffer ParticleSSBOIn  { Particle particlesIn[];  };
+layout(std140, binding = 2)          buffer ParticleSSBOOut { Particle particlesOut[]; };
 
-layout(std140, binding = 2) buffer ParticleSSBOOut {
-   Particle particlesOut[ ];
-};
-
-layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
-
-void main()
-{
+void main() {
     uint index = gl_GlobalInvocationID.x;
+    if (index >= particlesIn.length()) return;     // fixes the 1000 vs 1024 overrun
 
-    Particle particleIn = particlesIn[index];
-
-    particlesOut[index].position = particleIn.position + particleIn.velocity.xy * ubo.deltaTime;
-    particlesOut[index].velocity = particleIn.velocity;
+    Particle p = particlesIn[index];
+    particlesOut[index].position = p.position + p.velocity.xy * ubo.deltaTime;
+    particlesOut[index].velocity = p.velocity;
+    particlesOut[index].color    = p.color;
 }

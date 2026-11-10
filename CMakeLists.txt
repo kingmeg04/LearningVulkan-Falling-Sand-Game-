@@ -64,7 +64,10 @@ set(SHADERS
         ${SHADER_DIR}/shader4/shader4.frag
         ${SHADER_DIR}/shader4/shader4.vert
 
+
         ${SHADER_DIR}/shader5/shader5.comp
+        ${SHADER_DIR}/shader5/shader5.frag
+        ${SHADER_DIR}/shader5/shader5.vert
 )
 
 set(SPIRV_SHADERS)
