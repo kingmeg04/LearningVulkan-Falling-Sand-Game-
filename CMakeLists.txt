@@ -33,6 +33,10 @@ target_precompile_headers(VulkanLearning PRIVATE
     include/pch.h
 )
 
+if (MINGW)
+    target_link_options(VulkanLearning PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+
 # Include directories
 target_include_directories(VulkanLearning PRIVATE
     include

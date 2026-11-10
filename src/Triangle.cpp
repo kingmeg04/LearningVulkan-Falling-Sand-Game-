@@ -3,6 +3,12 @@
 #include "pch.h"
 #include "input.h"
 
+static std::filesystem::path exeDir() {
+    char buf[MAX_PATH];
+    GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    return std::filesystem::path(buf).parent_path();
+}
+
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities{};
     std::vector<VkSurfaceFormatKHR> formats;
@@ -105,8 +111,8 @@ struct ComputeUniformBufferObject {
 
 class HelloTriangleApplication {
 public:
-    const std::string COMPILER_OUT = "../cmake-build-debug/";
-    const std::string RESOURCES = "../resources/";
+    const std::string COMPILER_OUT = (exeDir() / "../cmake-build-debug/").string();
+    const std::string RESOURCES    = (exeDir() / "../resources/").string();
 
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
@@ -128,7 +134,7 @@ public:
 
     const uint32_t PARTICLE_COUNT = 1000;
 
-    #ifdef NDEBUG
+    #ifndef NDEBUG
         const bool enableValidationLayers = false;
     #else
         const bool enableValidationLayers = true;
@@ -591,7 +597,7 @@ private:
     // These three are "semi"-hardcoded methods, so I can easily have a validity check for device anywhere without redundancy
     // Check for all properties required from the device
     bool devicePropertySupport(VkPhysicalDeviceProperties deviceProperties) {
-        return (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+        return true;//(deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
     }
 
     // Check all features required from the device
@@ -761,14 +767,8 @@ private:
     bool framebufferResized = false;
 
     void createSurface() {
-        VkWin32SurfaceCreateInfoKHR createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;     // Use the windows specific extension
-        createInfo.hwnd = glfwGetWin32Window(window);                           // hwnd: handle to a window
-        createInfo.hinstance = GetModuleHandle(nullptr);                        // hinstance: handle to an instance of an application
-
-        if (vkCreateWin32SurfaceKHR(instance, &createInfo, nullptr, &surface) != VK_SUCCESS) {
+        if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS)
             throw std::runtime_error("failed to create window surface!");
-        }
     }
 
     void createSwapChain() {
